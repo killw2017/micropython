@@ -15,8 +15,12 @@
         "PimoroniPicoLipo_1of3_1024x1024.jpg"
     ],
     "mcu": "rp2040",
-    "product": "Pico LiPo (4MiB)",
+    "product": "Pico LiPo",
     "thumbnail": "",
     "url": "https://shop.pimoroni.com/products/pimoroni-pico-lipo",
+    "variants": {
+        "flash_4mb": "4 MiB Flash",
+        "flash_16mb": "16 MiB Flash"
+    },
     "vendor": "Pimoroni"
 }
