@@ -147,27 +147,34 @@ def create_task(coro):
     _task_queue.push(t)
     return t
 
-
 # Keep scheduling tasks until there are none left to schedule
 def run_until_complete(main_task=None):
     global cur_task
     excs_all = (CancelledError, Exception)  # To prevent heap allocation in loop
     excs_stop = (CancelledError, StopIteration)  # To prevent heap allocation in loop
+    _io_queue.wait_io_event(0)
     while True:
-        # Wait until the head of _task_queue is ready to run
-        dt = 1
-        while dt > 0:
-            dt = -1
+        try:
+            # Wait until the head of _task_queue is ready to run
             t = _task_queue.peek()
             if t:
                 # A task waiting on _task_queue; "ph_key" is time to schedule task at
-                dt = max(0, ticks_diff(t.ph_key, ticks()))
+                dt = ticks_diff(t.ph_key, ticks())
+                if dt > 0:
+                    _io_queue.wait_io_event(dt)
             elif not _io_queue.map:
                 # No tasks can be woken so finished running
                 cur_task = None
                 return
-            # print('(poll {})'.format(dt), len(_io_queue.map))
-            _io_queue.wait_io_event(dt)
+            else:
+                _io_queue.wait_io_event(-1)
+        except BaseException as exc:
+            try:
+                if main_task:
+                    main_task.coro.throw(exc)
+            except StopIteration:
+                pass
+            raise
 
         # Get next task to run and continue it
         t = _task_queue.pop()
