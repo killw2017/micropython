@@ -104,6 +104,77 @@ void SystemClock_Config(void) {
     powerctrl_config_systick();
 }
 
+#elif defined(STM32G0)
+
+void SystemClock_Config(void) {
+    // Enable power control peripheral
+    __HAL_RCC_PWR_CLK_ENABLE();
+
+    // Set flash latency to 2 because SYSCLK > 48MHz
+    FLASH->ACR = (FLASH->ACR & ~0x7) | 0x2;
+
+    #if MICROPY_HW_CLK_USE_HSI
+    // Enable the 16MHz internal oscillator and the PLL to get a 64MHz SYSCLK
+    RCC->CR |= RCC_CR_HSION;
+    while ((RCC->CR & RCC_CR_HSIRDY) == 0) {
+        // Wait for HSI to be ready
+    }
+
+    // Use the PLL to get a 64MHz SYSCLK
+    #define PLLM (HSI_VALUE / 16000000) // input is 8MHz
+    #define PLLN (8) // 8*16MHz = 128MHz
+    #define PLLP (2) // f_P = 64MHz
+    #define PLLQ (2) // f_Q = 64MHz
+    #define PLLR (2) // f_R = 64MHz
+    RCC->PLLCFGR =
+        (PLLP - 1) << RCC_PLLCFGR_PLLP_Pos | RCC_PLLCFGR_PLLPEN
+            | (PLLQ - 1) << RCC_PLLCFGR_PLLQ_Pos | RCC_PLLCFGR_PLLQEN
+            | (PLLR - 1) << RCC_PLLCFGR_PLLR_Pos | RCC_PLLCFGR_PLLREN
+            | PLLN << RCC_PLLCFGR_PLLN_Pos
+            | (PLLM - 1) << RCC_PLLCFGR_PLLM_Pos
+            | RCC_PLLCFGR_PLLSRC_HSI;
+
+    #else
+    #error System clock not specified
+    #endif
+
+    RCC->CR |= RCC_CR_PLLON; // Turn PLL on
+    while ((RCC->CR & RCC_CR_PLLRDY) == 0) {
+        // Wait for PLL to lock
+    }
+    const uint32_t sysclk_src = 2; // 2 = PLLRCLK
+
+    // Select SYSCLK source
+    RCC->CFGR |= sysclk_src << RCC_CFGR_SW_Pos;
+    while (((RCC->CFGR >> RCC_CFGR_SWS_Pos) & 0x7) != sysclk_src) {
+        // Wait for SYSCLK source to change
+    }
+
+    SystemCoreClockUpdate();
+    powerctrl_config_systick();
+
+    #if MICROPY_HW_ENABLE_RNG || MICROPY_HW_ENABLE_USB
+    // Enable the 48MHz internal oscillator
+    RCC->CRRCR |= RCC_CRRCR_HSI48ON;
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+    SYSCFG->CFGR3 |= SYSCFG_CFGR3_ENREF_HSI48;
+    while (!(RCC->CRRCR & RCC_CRRCR_HSI48RDY)) {
+        // Wait for HSI48 to be ready
+    }
+
+    // Select RC48 as HSI48 for USB and RNG
+    RCC->CCIPR |= RCC_CCIPR_HSI48SEL;
+
+    #if MICROPY_HW_ENABLE_USB
+    // Synchronise HSI48 with 1kHz USB SoF
+    __HAL_RCC_CRS_CLK_ENABLE();
+    CRS->CR = 0x20 << CRS_CR_TRIM_Pos;
+    CRS->CFGR = 2 << CRS_CFGR_SYNCSRC_Pos | 0x22 << CRS_CFGR_FELIM_Pos
+        | __HAL_RCC_CRS_RELOADVALUE_CALCULATE(48000000, 1000) << CRS_CFGR_RELOAD_Pos;
+    #endif
+    #endif
+}
+
 #elif defined(STM32L0)
 
 void SystemClock_Config(void) {
@@ -157,6 +228,74 @@ void SystemClock_Config(void) {
     #endif
 }
 
+#elif defined(STM32L1)
+
+void SystemClock_Config(void) {
+    // Enable power control peripheral
+    __HAL_RCC_PWR_CLK_ENABLE();
+
+    // Set power voltage scaling
+    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+    // Enable the FLASH 64-bit access
+    FLASH->ACR = FLASH_ACR_ACC64;
+    // Set flash latency to 1 because SYSCLK > 16MHz
+    FLASH->ACR |= MICROPY_HW_FLASH_LATENCY;
+
+    #if MICROPY_HW_CLK_USE_HSI
+    // Enable the 16MHz internal oscillator
+    RCC->CR |= RCC_CR_HSION;
+    while (!(RCC->CR & RCC_CR_HSIRDY)) {
+    }
+    RCC->CFGR = RCC_CFGR_PLLSRC_HSI;
+    #else
+    // Enable the 8MHz external oscillator
+    RCC->CR |= RCC_CR_HSEBYP;
+    RCC->CR |= RCC_CR_HSEON;
+    while (!(RCC->CR & RCC_CR_HSERDY)) {
+    }
+    RCC->CFGR = RCC_CFGR_PLLSRC_HSE;
+    #endif
+    // Use HSI16 and the PLL to get a 32MHz SYSCLK
+    RCC->CFGR |= MICROPY_HW_CLK_PLLMUL | MICROPY_HW_CLK_PLLDIV;
+    RCC->CR |= RCC_CR_PLLON;
+    while (!(RCC->CR & RCC_CR_PLLRDY)) {
+        // Wait for PLL to lock
+    }
+    RCC->CFGR |= RCC_CFGR_SW_PLL;
+
+    while ((RCC->CFGR & RCC_CFGR_SWS_Msk) != RCC_CFGR_SWS_PLL) {
+        // Wait for SYSCLK source to change
+    }
+
+    SystemCoreClockUpdate();
+    powerctrl_config_systick();
+
+    #if MICROPY_HW_ENABLE_USB
+    // Enable the 48MHz internal oscillator
+    RCC->CRRCR |= RCC_CRRCR_HSI48ON;
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+    SYSCFG->CFGR3 |= SYSCFG_CFGR3_ENREF_HSI48;
+    while (!(RCC->CRRCR & RCC_CRRCR_HSI48RDY)) {
+        // Wait for HSI48 to be ready
+    }
+
+    // Select RC48 as HSI48 for USB and RNG
+    RCC->CCIPR |= RCC_CCIPR_HSI48SEL;
+
+    // Synchronise HSI48 with 1kHz USB SoF
+    __HAL_RCC_CRS_CLK_ENABLE();
+    CRS->CR = 0x20 << CRS_CR_TRIM_Pos;
+    CRS->CFGR = 2 << CRS_CFGR_SYNCSRC_Pos | 0x22 << CRS_CFGR_FELIM_Pos
+        | __HAL_RCC_CRS_RELOADVALUE_CALCULATE(48000000, 1000) << CRS_CFGR_RELOAD_Pos;
+    #endif
+
+    // Disable the Debug Module in low-power mode due to prevent
+    // unexpected HardFault after __WFI().
+    #if !defined(NDEBUG)
+    DBGMCU->CR &= ~(DBGMCU_CR_DBG_SLEEP | DBGMCU_CR_DBG_STOP | DBGMCU_CR_DBG_STANDBY);
+    #endif
+}
 #elif defined(STM32WB)
 
 #include "stm32wbxx_ll_hsem.h"

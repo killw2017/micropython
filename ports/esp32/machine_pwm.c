@@ -74,7 +74,8 @@ STATIC ledc_timer_config_t timers[PWM_TIMER_MAX];
 // Params for PWM operation
 // 5khz is default frequency
 #define PWM_FREQ (5000)
-// default 10-bit resolution (compatible with esp8266 PWM)
+
+// 10-bit resolution (compatible with esp8266 PWM)
 #define PWM_RES_10_BIT (LEDC_TIMER_10_BIT)
 
 // Maximum duty value on 10-bit resolution
@@ -84,18 +85,22 @@ STATIC ledc_timer_config_t timers[PWM_TIMER_MAX];
 // duty_u16() and duty_ns() use 16-bit resolution or less
 
 // Possible highest resolution in device
-#if CONFIG_IDF_TARGET_ESP32
-#define HIGHEST_PWM_RES (LEDC_TIMER_16_BIT) // 20 bit for ESP32, but 16 bit is used
+#if (LEDC_TIMER_BIT_MAX - 1) < LEDC_TIMER_16_BIT
+#define HIGHEST_PWM_RES (LEDC_TIMER_BIT_MAX - 1)
 #else
-#define HIGHEST_PWM_RES (LEDC_TIMER_BIT_MAX - 1) // 14 bit is used
+#define HIGHEST_PWM_RES (LEDC_TIMER_16_BIT) // 20 bit for ESP32, but 16 bit is used
 #endif
 // Duty resolution of user interface in `duty_u16()` and `duty_u16` parameter in constructor/initializer
 #define UI_RES_16_BIT (16)
 // Maximum duty value on highest user interface resolution
 #define UI_MAX_DUTY ((1 << UI_RES_16_BIT) - 1)
+// How much to shift from the HIGHEST_PWM_RES duty resolution to the user interface duty resolution UI_RES_16_BIT
+#define UI_RES_SHIFT (UI_RES_16_BIT - HIGHEST_PWM_RES) // 0 for ESP32, 2 for S2, S3, C3
 
+#if SOC_LEDC_SUPPORT_REF_TICK
 // If the PWM frequency is less than EMPIRIC_FREQ, then LEDC_REF_CLK_HZ(1 MHz) source is used, else LEDC_APB_CLK_HZ(80 MHz) source is used
 #define EMPIRIC_FREQ (10) // Hz
+#endif
 
 // Config of timer upon which we run all PWM'ed GPIO pins
 STATIC bool pwm_inited = false;
@@ -108,7 +113,7 @@ typedef struct _machine_pwm_obj_t {
     int mode;
     int channel;
     int timer;
-    int duty_x; // PWM_RES_10_BIT if duty(), UI_RES_16_BIT if duty_u16(), -UI_RES_16_BIT if duty_ns()
+    int duty_x; // PWM_RES_10_BIT if duty(), HIGHEST_PWM_RES if duty_u16(), -HIGHEST_PWM_RES if duty_ns()
     int duty_u10; // stored values from previous duty setters
     int duty_u16; // - / -
     int duty_ns; // - / -
@@ -205,9 +210,11 @@ STATIC void set_freq(machine_pwm_obj_t *self, unsigned int freq, ledc_timer_conf
     if (freq != timer->freq_hz) {
         // Find the highest bit resolution for the requested frequency
         unsigned int i = LEDC_APB_CLK_HZ; // 80 MHz
+        #if SOC_LEDC_SUPPORT_REF_TICK
         if (freq < EMPIRIC_FREQ) {
             i = LEDC_REF_CLK_HZ; // 1 MHz
         }
+        #endif
 
         #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
         // original code
@@ -237,13 +244,14 @@ STATIC void set_freq(machine_pwm_obj_t *self, unsigned int freq, ledc_timer_conf
         }
 
         // Configure the new resolution and frequency
-        unsigned int save_duty_resolution = timer->duty_resolution;
         timer->duty_resolution = res;
         timer->freq_hz = freq;
         timer->clk_cfg = LEDC_USE_APB_CLK;
+        #if SOC_LEDC_SUPPORT_REF_TICK
         if (freq < EMPIRIC_FREQ) {
             timer->clk_cfg = LEDC_USE_REF_TICK;
         }
+        #endif
 
         // Set frequency
         esp_err_t err = ledc_timer_config(timer);
@@ -258,17 +266,15 @@ STATIC void set_freq(machine_pwm_obj_t *self, unsigned int freq, ledc_timer_conf
         if (self->mode == LEDC_LOW_SPEED_MODE) {
             check_esp_err(ledc_timer_rst(self->mode, self->timer));
         }
+    }
 
-        // Save the same duty cycle when frequency is changed
-        if (save_duty_resolution != timer->duty_resolution) {
-            if (self->duty_x == UI_RES_16_BIT) {
-                set_duty_u16(self, self->duty_u16);
-            } else if (self->duty_x == PWM_RES_10_BIT) {
-                set_duty_u10(self, self->duty_u10);
-            } else if (self->duty_x == -UI_RES_16_BIT) {
-                set_duty_ns(self, self->duty_ns);
-            }
-        }
+    // Save the same duty cycle when frequency is changed
+    if (self->duty_x == HIGHEST_PWM_RES) {
+        set_duty_u16(self, self->duty_u16);
+    } else if (self->duty_x == PWM_RES_10_BIT) {
+        set_duty_u10(self, self->duty_u10);
+    } else if (self->duty_x == -HIGHEST_PWM_RES) {
+        set_duty_ns(self, self->duty_ns);
     }
 }
 
@@ -292,24 +298,46 @@ STATIC int duty_to_ns(machine_pwm_obj_t *self, int duty) {
 
 #define get_duty_raw(self) ledc_get_duty(self->mode, self->channel)
 
+STATIC void pwm_is_active(machine_pwm_obj_t *self) {
+    if (self->active == false) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("PWM inactive"));
+    }
+}
+
 STATIC uint32_t get_duty_u16(machine_pwm_obj_t *self) {
-    return ledc_get_duty(self->mode, self->channel) << (UI_RES_16_BIT - timers[TIMER_IDX(self->mode, self->timer)].duty_resolution);
+    pwm_is_active(self);
+    int resolution = timers[TIMER_IDX(self->mode, self->timer)].duty_resolution;
+    int duty = ledc_get_duty(self->mode, self->channel);
+    if (resolution <= UI_RES_16_BIT) {
+        duty <<= (UI_RES_16_BIT - resolution);
+    } else {
+        duty >>= (resolution - UI_RES_16_BIT);
+    }
+    return duty;
 }
 
 STATIC uint32_t get_duty_u10(machine_pwm_obj_t *self) {
-    return get_duty_u16(self) >> (UI_RES_16_BIT - LEDC_TIMER_10_BIT);
+    pwm_is_active(self);
+    return get_duty_u16(self) >> 6; // Scale down from 16 bit to 10 bit resolution
 }
 
 STATIC uint32_t get_duty_ns(machine_pwm_obj_t *self) {
+    pwm_is_active(self);
     return duty_to_ns(self, get_duty_u16(self));
 }
 
 STATIC void set_duty_u16(machine_pwm_obj_t *self, int duty) {
+    pwm_is_active(self);
     if ((duty < 0) || (duty > UI_MAX_DUTY)) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("duty_u16 must be from 0 to %d"), UI_MAX_DUTY);
     }
     ledc_timer_config_t timer = timers[TIMER_IDX(self->mode, self->timer)];
-    int channel_duty = duty >> (UI_RES_16_BIT - timer.duty_resolution);
+    int channel_duty;
+    if (timer.duty_resolution <= UI_RES_16_BIT) {
+        channel_duty = duty >> (UI_RES_16_BIT - timer.duty_resolution);
+    } else {
+        channel_duty = duty << (timer.duty_resolution - UI_RES_16_BIT);
+    }
     int max_duty = (1 << timer.duty_resolution) - 1;
     if (channel_duty < 0) {
         channel_duty = 0;
@@ -333,25 +361,27 @@ STATIC void set_duty_u16(machine_pwm_obj_t *self, int duty) {
     }
     */
 
-    self->duty_x = UI_RES_16_BIT;
+    self->duty_x = HIGHEST_PWM_RES;
     self->duty_u16 = duty;
 }
 
 STATIC void set_duty_u10(machine_pwm_obj_t *self, int duty) {
+    pwm_is_active(self);
     if ((duty < 0) || (duty > MAX_DUTY_U10)) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("duty must be from 0 to %u"), MAX_DUTY_U10);
     }
-    set_duty_u16(self, duty << (UI_RES_16_BIT - LEDC_TIMER_10_BIT));
+    set_duty_u16(self, duty << (UI_RES_16_BIT - PWM_RES_10_BIT));
     self->duty_x = PWM_RES_10_BIT;
     self->duty_u10 = duty;
 }
 
 STATIC void set_duty_ns(machine_pwm_obj_t *self, int ns) {
+    pwm_is_active(self);
     if ((ns < 0) || (ns > duty_to_ns(self, UI_MAX_DUTY))) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("duty_ns must be from 0 to %d ns"), duty_to_ns(self, UI_MAX_DUTY));
     }
     set_duty_u16(self, ns_to_duty(self, ns));
-    self->duty_x = -UI_RES_16_BIT;
+    self->duty_x = -HIGHEST_PWM_RES;
     self->duty_ns = ns;
 }
 
@@ -424,7 +454,7 @@ STATIC void mp_machine_pwm_print(const mp_print_t *print, mp_obj_t self_in, mp_p
 
         if (self->duty_x == PWM_RES_10_BIT) {
             mp_printf(print, ", duty=%d", get_duty_u10(self));
-        } else if (self->duty_x == -UI_RES_16_BIT) {
+        } else if (self->duty_x == -HIGHEST_PWM_RES) {
             mp_printf(print, ", duty_ns=%d", get_duty_ns(self));
         } else {
             mp_printf(print, ", duty_u16=%d", get_duty_u16(self));
@@ -544,8 +574,7 @@ STATIC mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type,
     gpio_num_t pin_id = machine_pin_get_id(args[0]);
 
     // create PWM object from the given pin
-    machine_pwm_obj_t *self = m_new_obj(machine_pwm_obj_t);
-    self->base.type = &machine_pwm_type;
+    machine_pwm_obj_t *self = mp_obj_malloc(machine_pwm_obj_t, &machine_pwm_type);
     self->pin = pin_id;
     self->active = false;
     self->mode = -1;
@@ -581,10 +610,12 @@ STATIC void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
 // Set's and get's methods of PWM class
 
 STATIC mp_obj_t mp_machine_pwm_freq_get(machine_pwm_obj_t *self) {
+    pwm_is_active(self);
     return MP_OBJ_NEW_SMALL_INT(ledc_get_freq(self->mode, self->timer));
 }
 
 STATIC void mp_machine_pwm_freq_set(machine_pwm_obj_t *self, mp_int_t freq) {
+    pwm_is_active(self);
     if ((freq <= 0) || (freq > 40000000)) {
         mp_raise_ValueError(MP_ERROR_TEXT("freqency must be from 1Hz to 40MHz"));
     }

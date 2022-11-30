@@ -99,12 +99,14 @@ NORETURN void esp_exceptions_helper(esp_err_t e) {
 // thread to the main MicroPython task.  It must not raise any Python exceptions.
 static esp_err_t event_handler(void *ctx, system_event_t *event) {
     switch (event->event_id) {
+        #if MICROPY_PY_NETWORK_WLAN
         case SYSTEM_EVENT_STA_START:
         case SYSTEM_EVENT_STA_CONNECTED:
         case SYSTEM_EVENT_STA_GOT_IP:
         case SYSTEM_EVENT_STA_DISCONNECTED:
             network_wlan_event_handler(event);
             break;
+        #endif
         case SYSTEM_EVENT_GOT_IP6:
             ESP_LOGI("network", "Got IPv6");
             break;
@@ -242,6 +244,7 @@ STATIC const mp_rom_map_elem_t mp_module_network_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_MODE_11B), MP_ROM_INT(WIFI_PROTOCOL_11B) },
     { MP_ROM_QSTR(MP_QSTR_MODE_11G), MP_ROM_INT(WIFI_PROTOCOL_11G) },
     { MP_ROM_QSTR(MP_QSTR_MODE_11N), MP_ROM_INT(WIFI_PROTOCOL_11N) },
+    { MP_ROM_QSTR(MP_QSTR_MODE_LR), MP_ROM_INT(WIFI_PROTOCOL_LR) },
 
     { MP_ROM_QSTR(MP_QSTR_AUTH_OPEN), MP_ROM_INT(WIFI_AUTH_OPEN) },
     { MP_ROM_QSTR(MP_QSTR_AUTH_WEP), MP_ROM_INT(WIFI_AUTH_WEP) },
@@ -293,3 +296,7 @@ const mp_obj_module_t mp_module_network = {
     .base = { &mp_type_module },
     .globals = (mp_obj_dict_t *)&mp_module_network_globals,
 };
+
+// Note: This port doesn't define MICROPY_PY_NETWORK so this will not conflict
+// with the common implementation provided by extmod/modnetwork.c.
+MP_REGISTER_MODULE(MP_QSTR_network, mp_module_network);
