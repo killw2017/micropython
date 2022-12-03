@@ -54,7 +54,8 @@ class SingletonGenerator:
 # Use a SingletonGenerator to do it without allocating on the heap
 def sleep_ms(t, sgen=SingletonGenerator()):
     assert sgen.state is None
-    sgen.state = ticks_add(ticks(), max(0, t))
+    now = ticks()
+    sgen.state = ticks_add(now, t) if t > 0 else now
     return sgen
 
 
