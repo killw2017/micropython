@@ -30,7 +30,7 @@
 #include "py/mperrno.h"
 #include "extmod/machine_spi.h"
 #include "modmachine.h"
-#include "dma_channel.h"
+#include CLOCK_CONFIG_H
 
 #include "fsl_cache.h"
 #include "fsl_dmamux.h"
@@ -47,15 +47,21 @@
 
 #define CLOCK_DIVIDER           (1)
 
+#if defined(MIMXRT117x_SERIES)
+#define LPSPI_DMAMUX            DMAMUX0
+#else
+#define LPSPI_DMAMUX            DMAMUX
+#endif
+
 #define MICROPY_HW_SPI_NUM MP_ARRAY_SIZE(spi_index_table)
 
-#define SCK (iomux_table[index_iomux])
-#define CS0 (iomux_table[index_iomux + 1])
-#define SDO (iomux_table[index_iomux + 2])
-#define SDI (iomux_table[index_iomux + 3])
-#define CS1 (iomux_table[index_iomux + 4])
-#define CS0_ALT (iomux_table[index_iomux + 5])
-#define SDI_ALT (iomux_table[index_iomux + 6])
+#define SCK (iomux_table[index])
+#define CS0 (iomux_table[index + 1])
+#define SDO (iomux_table[index + 2])
+#define SDI (iomux_table[index + 3])
+#define CS1 (iomux_table[index + 4])
+#define CS0_ALT (iomux_table[index + 5])
+#define SDI_ALT (iomux_table[index + 6])
 #define IOMUX_INDEX(spi) (((spi) - 1) * 7)
 
 typedef struct _machine_spi_obj_t {
@@ -83,18 +89,16 @@ static const iomux_table_t iomux_table[] = {
     IOMUX_TABLE_SPI
 };
 
-static uint16_t dma_req_src_rx[] = DMA_REQ_SRC_RX;
-static uint16_t dma_req_src_tx[] = DMA_REQ_SRC_TX;
 
-bool lpspi_set_iomux(int8_t spi, uint8_t drive, const machine_pin_obj_t *pin_miso, const machine_pin_obj_t *pin_cs) {
-    int index_iomux = IOMUX_INDEX(spi);
+bool lpspi_set_iomux(int8_t spi, uint8_t drive, const machine_pin_obj_t *pin_miso, const machine_pin_obj_t * pin_mosi, const machine_pin_obj_t *pin_cs) {
+    int index = IOMUX_INDEX(spi);
 
     if (SCK.muxRegister != 0) {
         IOMUXC_SetPinMux(SCK.muxRegister, SCK.muxMode, SCK.inputRegister, SCK.inputDaisy, SCK.configRegister, 0U);
         IOMUXC_SetPinConfig(SCK.muxRegister, SCK.muxMode, SCK.inputRegister, SCK.inputDaisy, SCK.configRegister,
             pin_generate_config(PIN_PULL_UP_100K, PIN_MODE_OUT, drive, SCK.configRegister));
 
-        if ((pin_cs == NULL || pin_cs == CS0.pin) && CS0.muxRegister != 0) {
+        if (pin_cs == CS0.pin && CS0.muxRegister != 0) {
             IOMUXC_SetPinMux(CS0.muxRegister, CS0.muxMode, CS0.inputRegister, CS0.inputDaisy, CS0.configRegister, 0U);
             IOMUXC_SetPinConfig(CS0.muxRegister, CS0.muxMode, CS0.inputRegister, CS0.inputDaisy, CS0.configRegister,
                 pin_generate_config(PIN_PULL_UP_100K, PIN_MODE_OUT, drive, CS0.configRegister));
@@ -106,13 +110,17 @@ bool lpspi_set_iomux(int8_t spi, uint8_t drive, const machine_pin_obj_t *pin_mis
             IOMUXC_SetPinMux(CS1.muxRegister, CS1.muxMode, CS1.inputRegister, CS1.inputDaisy, CS1.configRegister, 0U);
             IOMUXC_SetPinConfig(CS1.muxRegister, CS1.muxMode, CS1.inputRegister, CS1.inputDaisy, CS1.configRegister,
                 pin_generate_config(PIN_PULL_UP_100K, PIN_MODE_OUT, drive, CS1.configRegister));
-        } else {
+        } else if (pin_cs!=NULL) {
             mp_raise_ValueError(MP_ERROR_TEXT("The chosen CS is not available"));
         }
 
-        IOMUXC_SetPinMux(SDO.muxRegister, SDO.muxMode, SDO.inputRegister, SDO.inputDaisy, SDO.configRegister, 0U);
-        IOMUXC_SetPinConfig(SDO.muxRegister, SDO.muxMode, SDO.inputRegister, SDO.inputDaisy, SDO.configRegister,
-            pin_generate_config(PIN_PULL_UP_100K, PIN_MODE_OUT, drive, SDO.configRegister));
+        if (pin_mosi == NULL || pin_mosi == SDO.pin) {
+            IOMUXC_SetPinMux(SDO.muxRegister, SDO.muxMode, SDO.inputRegister, SDO.inputDaisy, SDO.configRegister, 0U);
+            IOMUXC_SetPinConfig(SDO.muxRegister, SDO.muxMode, SDO.inputRegister, SDO.inputDaisy, SDO.configRegister,
+                pin_generate_config(PIN_PULL_UP_100K, PIN_MODE_OUT, drive, SDO.configRegister));
+        } else {
+            mp_raise_ValueError(MP_ERROR_TEXT("The chosen MOSI is not available"));
+        }
 
         if (pin_miso == NULL || pin_miso == SDI.pin) {
             IOMUXC_SetPinMux(SDI.muxRegister, SDI.muxMode, SDI.inputRegister, SDI.inputDaisy, SDI.configRegister, 0U);
@@ -142,7 +150,7 @@ STATIC void machine_spi_print(const mp_print_t *print, mp_obj_t self_in, mp_prin
 }
 
 mp_obj_t machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    enum { ARG_id, ARG_baudrate, ARG_polarity, ARG_phase, ARG_bits, ARG_firstbit, ARG_gap_ns, ARG_drive, ARG_miso, ARG_cs };
+    enum { ARG_id, ARG_baudrate, ARG_polarity, ARG_phase, ARG_bits, ARG_firstbit, ARG_gap_ns, ARG_drive, ARG_miso, ARG_mosi, ARG_cs };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_id,       MP_ARG_REQUIRED | MP_ARG_OBJ },
         { MP_QSTR_baudrate, MP_ARG_INT, {.u_int = DEFAULT_SPI_BAUDRATE} },
@@ -152,11 +160,10 @@ mp_obj_t machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
         { MP_QSTR_firstbit, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_FIRSTBIT} },
         { MP_QSTR_gap_ns,   MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_drive,    MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_DRIVE} },
-        { MP_QSTR_miso,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_miso,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_mosi,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_cs,       MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
-
-    static bool clk_init = true;
 
     // Parse the arguments.
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -170,8 +177,7 @@ mp_obj_t machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
 
     // Get peripheral object.
     uint8_t spi_hw_id = spi_index_table[spi_id];  // the hw spi number 1..n
-    machine_spi_obj_t *self = m_new_obj(machine_spi_obj_t);
-    self->base.type = &machine_spi_type;
+    machine_spi_obj_t *self = mp_obj_malloc(machine_spi_obj_t, &machine_spi_type);
     self->spi_id = spi_id;
     self->spi_inst = spi_base_ptr_table[spi_hw_id];
     self->spi_hw_id = spi_hw_id;
@@ -181,12 +187,6 @@ mp_obj_t machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
         drive = DEFAULT_SPI_DRIVE;
     }
 
-    if (clk_init) {
-        clk_init = false;
-        /*Set clock source for LPSPI*/
-        CLOCK_SetMux(kCLOCK_LpspiMux, 1);  // Clock source is kCLOCK_Usb1PllPfd1Clk
-        CLOCK_SetDiv(kCLOCK_LpspiDiv, CLOCK_DIVIDER);
-    }
     LPSPI_Reset(self->spi_inst);
     LPSPI_Enable(self->spi_inst, false);  // Disable first before new settings are applies
 
@@ -202,24 +202,31 @@ mp_obj_t machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
     if (args[ARG_gap_ns].u_int != -1) {
         self->master_config->betweenTransferDelayInNanoSec = args[ARG_gap_ns].u_int;
     }
-
+    self->master_config->lastSckToPcsDelayInNanoSec = self->master_config->betweenTransferDelayInNanoSec;
+    self->master_config->pcsToSckDelayInNanoSec = self->master_config->betweenTransferDelayInNanoSec;
+    
     const machine_pin_obj_t *pin_miso = NULL;
-    if (args[ARG_miso].u_obj != mp_const_none) {
+    if (args[ARG_miso].u_obj != MP_OBJ_NULL) {
         pin_miso = pin_find(args[ARG_miso].u_obj);
+    }
+    const machine_pin_obj_t *pin_mosi = NULL;
+    if (args[ARG_mosi].u_obj != MP_OBJ_NULL) {
+        pin_mosi = pin_find(args[ARG_mosi].u_obj);
     }
     const machine_pin_obj_t *pin_cs = NULL;
     if (args[ARG_cs].u_obj != mp_const_none) {
         pin_cs = pin_find(args[ARG_cs].u_obj);
     }
 
-    int index_iomux = IOMUX_INDEX(spi_index_table[spi_id]);
+    int index = IOMUX_INDEX(spi_index_table[spi_id]);
+
     self->master_config->whichPcs = 0;
     if (pin_cs != NULL && pin_cs == CS1.pin) {
         self->master_config->whichPcs = 1;
     }
 
-    LPSPI_MasterInit(self->spi_inst, self->master_config, CLOCK_GetFreq(kCLOCK_Usb1PllPfd0Clk) / (CLOCK_DIVIDER + 1));
-    lpspi_set_iomux(spi_index_table[spi_id], drive, pin_miso, pin_cs);
+    LPSPI_MasterInit(self->spi_inst, self->master_config, BOARD_BOOTCLOCKRUN_LPSPI_CLK_ROOT);
+    lpspi_set_iomux(spi_index_table[spi_id], drive, pin_miso, pin_mosi, pin_cs);
 
     return MP_OBJ_FROM_PTR(self);
 }
@@ -261,108 +268,26 @@ STATIC void machine_spi_init(mp_obj_base_t *self_in, size_t n_args, const mp_obj
     if (args[ARG_gap_ns].u_int != -1) {
         self->master_config->betweenTransferDelayInNanoSec = args[ARG_gap_ns].u_int;
     }
+    self->master_config->lastSckToPcsDelayInNanoSec = self->master_config->betweenTransferDelayInNanoSec;
+    self->master_config->pcsToSckDelayInNanoSec = self->master_config->betweenTransferDelayInNanoSec;
     LPSPI_Enable(self->spi_inst, false);  // Disable first before new settings are applies
-    LPSPI_MasterInit(self->spi_inst, self->master_config, CLOCK_GetFreq(kCLOCK_Usb1PllPfd0Clk) / (CLOCK_DIVIDER + 1));
-}
-
-void LPSPI_EDMAMasterCallback(LPSPI_Type *base, lpspi_master_edma_handle_t *handle, status_t status, void *self_in) {
-    machine_spi_obj_t *self = (machine_spi_obj_t *)self_in;
-    self->transfer_busy = false;
+    LPSPI_MasterInit(self->spi_inst, self->master_config, BOARD_BOOTCLOCKRUN_LPSPI_CLK_ROOT);
 }
 
 STATIC void machine_spi_transfer(mp_obj_base_t *self_in, size_t len, const uint8_t *src, uint8_t *dest) {
     machine_spi_obj_t *self = (machine_spi_obj_t *)self_in;
-    // Use DMA for large transfers if channels are available
-    const size_t dma_min_size_threshold = FSL_FEATURE_LPSPI_FIFO_SIZEn(0);  // The Macro argument is ignored
 
-    int chan_tx = -1;
-    int chan_rx = -1;
-    if (len >= dma_min_size_threshold) {
-        // Use two DMA channels to service the two FIFOs
-        chan_rx = allocate_dma_channel();
-        chan_tx = allocate_dma_channel();
-    }
-    bool use_dma = chan_rx >= 0 && chan_tx >= 0;
+    // Wait a short while for the previous transfer to finish, but not forever
+    for (volatile int j = 0; (j < 5000) && ((self->spi_inst->SR & kLPSPI_ModuleBusyFlag) != 0); j++) {}
 
-    if (use_dma) {
-        edma_config_t userConfig;
+    lpspi_transfer_t masterXfer;
+    masterXfer.txData = (uint8_t *)src;
+    masterXfer.rxData = (uint8_t *)dest;
+    masterXfer.dataSize = len;
+    masterXfer.configFlags = (self->master_config->whichPcs << LPSPI_MASTER_PCS_SHIFT) | kLPSPI_MasterPcsContinuous | kLPSPI_MasterByteSwap;
 
-        /* DMA MUX init*/
-        DMAMUX_Init(DMAMUX);
-
-        DMAMUX_SetSource(DMAMUX, chan_rx, dma_req_src_rx[self->spi_hw_id]); // ## SPIn source
-        DMAMUX_EnableChannel(DMAMUX, chan_rx);
-
-        DMAMUX_SetSource(DMAMUX, chan_tx, dma_req_src_tx[self->spi_hw_id]);
-        DMAMUX_EnableChannel(DMAMUX, chan_tx);
-
-        EDMA_GetDefaultConfig(&userConfig);
-        EDMA_Init(DMA0, &userConfig);
-
-        lpspi_master_edma_handle_t g_master_edma_handle;
-        edma_handle_t lpspiEdmaMasterRxRegToRxDataHandle;
-        edma_handle_t lpspiEdmaMasterTxDataToTxRegHandle;
-
-        // Set up lpspi EDMA master
-        EDMA_CreateHandle(&(lpspiEdmaMasterRxRegToRxDataHandle), DMA0, chan_rx);
-        EDMA_CreateHandle(&(lpspiEdmaMasterTxDataToTxRegHandle), DMA0, chan_tx);
-        LPSPI_MasterTransferCreateHandleEDMA(self->spi_inst, &g_master_edma_handle, LPSPI_EDMAMasterCallback, self,
-            &lpspiEdmaMasterRxRegToRxDataHandle,
-            &lpspiEdmaMasterTxDataToTxRegHandle);
-        // Start master transfer
-        lpspi_transfer_t masterXfer;
-        masterXfer.txData = (uint8_t *)src;
-        masterXfer.rxData = (uint8_t *)dest;
-        masterXfer.dataSize = len;
-        masterXfer.configFlags = (self->master_config->whichPcs << LPSPI_MASTER_PCS_SHIFT) | kLPSPI_MasterPcsContinuous | kLPSPI_MasterByteSwap;
-
-        // Reconfigure the TCR, required after switch between DMA vs. non-DMA
-        LPSPI_Enable(self->spi_inst, false);  // Disable first before new settings are applied
-        self->spi_inst->TCR = LPSPI_TCR_CPOL(self->master_config->cpol) | LPSPI_TCR_CPHA(self->master_config->cpha) |
-            LPSPI_TCR_LSBF(self->master_config->direction) | LPSPI_TCR_FRAMESZ(self->master_config->bitsPerFrame - 1) |
-            (self->spi_inst->TCR & LPSPI_TCR_PRESCALE_MASK) | LPSPI_TCR_PCS(self->master_config->whichPcs);
-        LPSPI_Enable(self->spi_inst, true);
-
-        self->transfer_busy = true;
-        if (dest) {
-            L1CACHE_DisableDCache();
-        } else if (src) {
-            DCACHE_CleanByRange((uint32_t)src, len);
-        }
-        LPSPI_MasterTransferEDMA(self->spi_inst, &g_master_edma_handle, &masterXfer);
-
-        while (self->transfer_busy) {
-            MICROPY_EVENT_POLL_HOOK
-        }
-        L1CACHE_EnableDCache();
-    }
-    // Release DMA channels, even if never allocated.
-    if (chan_rx >= 0) {
-        free_dma_channel(chan_rx);
-    }
-    if (chan_tx >= 0) {
-        free_dma_channel(chan_tx);
-    }
-
-    if (!use_dma) {
-        // Wait until a previous Transfer is finished
-        while (LPSPI_GetTxFifoCount(self->spi_inst) > 0) {
-            MICROPY_EVENT_POLL_HOOK
-        }
-        // Reconfigure the TCR, required after switch between DMA vs. non-DMA
-        LPSPI_Enable(self->spi_inst, false);  // Disable first before new settings are applied
-        self->spi_inst->TCR = LPSPI_TCR_CPOL(self->master_config->cpol) | LPSPI_TCR_CPHA(self->master_config->cpha) |
-            LPSPI_TCR_LSBF(self->master_config->direction) | LPSPI_TCR_FRAMESZ(self->master_config->bitsPerFrame - 1) |
-            (self->spi_inst->TCR & LPSPI_TCR_PRESCALE_MASK) | LPSPI_TCR_PCS(self->master_config->whichPcs);
-        LPSPI_Enable(self->spi_inst, true);
-
-        lpspi_transfer_t masterXfer;
-        masterXfer.txData = (uint8_t *)src;
-        masterXfer.rxData = (uint8_t *)dest;
-        masterXfer.dataSize = len;
-        masterXfer.configFlags = (self->master_config->whichPcs << LPSPI_MASTER_PCS_SHIFT) | kLPSPI_MasterPcsContinuous | kLPSPI_MasterByteSwap;
-
-        LPSPI_MasterTransferBlocking(self->spi_inst, &masterXfer);
+    if (LPSPI_MasterTransferBlocking(self->spi_inst, &masterXfer) != kStatus_Success) {
+        mp_raise_OSError(EIO);
     }
 }
 
@@ -371,11 +296,12 @@ STATIC const mp_machine_spi_p_t machine_spi_p = {
     .transfer = machine_spi_transfer,
 };
 
-const mp_obj_type_t machine_spi_type = {
-    { &mp_type_type },
-    .name = MP_QSTR_SPI,
-    .print = machine_spi_print,
-    .make_new = machine_spi_make_new,
-    .protocol = &machine_spi_p,
-    .locals_dict = (mp_obj_dict_t *)&mp_machine_spi_locals_dict,
-};
+MP_DEFINE_CONST_OBJ_TYPE(
+    machine_spi_type,
+    MP_QSTR_SPI,
+    MP_TYPE_FLAG_NONE,
+    make_new, machine_spi_make_new,
+    print, machine_spi_print,
+    protocol, &machine_spi_p,
+    locals_dict, &mp_machine_spi_locals_dict
+    );
