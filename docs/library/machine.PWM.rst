@@ -11,20 +11,20 @@ Example usage::
     from machine import PWM
 
     pwm = PWM(pin, freq=50, duty_u16=8192)  # create a PWM object on a pin
-                                            # and set freq and duty
-    pwm.duty_u16(32768)     # set duty to 50%
+                                            # and set freq 50 Hz and duty 12.5%
+    pwm.duty_u16(32768)                     # set duty to 50%
 
     # reinitialise with a period of 200us, duty of 5us
     pwm.init(freq=5000, duty_ns=5000)
 
-    pwm.duty_ns(3000)       # set pulse width to 3us
+    pwm.duty_ns(3000)                       # set pulse width to 3us
 
     pwm.deinit()
 
 Constructors
 ------------
 
-.. class:: PWM(dest, *, freq, duty_u16, duty_ns, invert)
+.. class:: PWM(dest, *, freq, duty_u16, duty_ns, invert=False)
 
    Construct and return a new PWM object using the following parameters:
 
@@ -40,7 +40,7 @@ Constructors
    Setting *freq* may affect other PWM objects if the objects share the same
    underlying PWM generator (this is hardware specific).
    Only one of *duty_u16* and *duty_ns* should be specified at a time.
-   *invert* is not available at all ports.
+   *invert* is available at RP2, i.MXRT, SAMD, nRF, ESP32 ports.
 
 Methods
 -------
@@ -73,6 +73,14 @@ Methods
    With a single *value* argument the duty cycle is set to that value, measured
    as the ratio ``value / 65535``.
 
+   Use functions like these to convert percentages to u16 and back::
+
+      def percents_to_u16(percents:int)->int:
+          return (percents * 2**16 + 50) // 100
+
+      def u16_to_percents(u16:int)->int:
+          return (u16 * 100 + 2**15) // 2**16
+
 .. method:: PWM.duty_ns([value])
 
    Get or set the current pulse width of the PWM output, as a value in nanoseconds.
@@ -86,7 +94,7 @@ Specific PWM class implementations
 
 The following concrete class(es) implement enhancements to the PWM class.
 
-   | :ref:`pyb.Timer for PyBoard <pyb.Timer>`  
+   | :ref:`pyb.Timer for PyBoard <pyb.Timer>`
 
 Limitations of PWM
 ------------------
@@ -103,7 +111,7 @@ Limitations of PWM
   Some ports like the RP2040 one use a fractional divider, which allow a finer
   granularity of the frequency at higher frequencies by switching the PWM
   pulse duration between two adjacent values, such that the resulting average
-  frequency is more close to the intended one, at the cost of spectral purity. 
+  frequency is more close to the intended one, at the cost of spectral purity.
 
 * The duty cycle has the same discrete nature and its absolute accuracy is not
   achievable.  On most hardware platforms the duty will be applied at the next
