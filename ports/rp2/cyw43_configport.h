@@ -33,7 +33,6 @@
 #include "extmod/modnetwork.h"
 #include "pendsv.h"
 
-#define CYW43_CHIPSET_FIRMWARE_INCLUDE_FILE "w43439A0_7_95_49_00_combined.h"
 #define CYW43_WIFI_NVRAM_INCLUDE_FILE   "wifi_nvram_43439.h"
 #define CYW43_IOCTL_TIMEOUT_US          (1000000)
 #define CYW43_SLEEP_MAX                 (10)
@@ -116,6 +115,12 @@ static inline void cyw43_delay_ms(uint32_t ms) {
         MICROPY_EVENT_POLL_HOOK_FAST;
     }
 }
+
+// cybt_fw_download_prepare does a malloc for the time being
+extern void *gc_alloc(size_t n_bytes, unsigned int alloc_flags);
+extern void gc_free(void *ptr);
+#define cyw43_malloc(S) gc_alloc(S, false)
+#define cyw43_free(S) gc_free(S)
 
 #define CYW43_EVENT_POLL_HOOK MICROPY_EVENT_POLL_HOOK_FAST
 
