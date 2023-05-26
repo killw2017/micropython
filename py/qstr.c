@@ -187,7 +187,7 @@ qstr qstr_find_strn(const char *str, size_t str_len) {
     for (const qstr_pool_t *pool = MP_STATE_VM(last_pool); pool != NULL; pool = pool->prev) {
         for (mp_uint_t at = 0, top = pool->len; at < top; at++) {
             if (pool->hashes[at] == str_hash && pool->lengths[at] == str_len
-                && memcmp(pool->qstrs[at], str, str_len) == 0) {
+                && memcmp0(pool->qstrs[at], str, str_len) == 0) {
                 return pool->total_prev_len + at;
             }
         }

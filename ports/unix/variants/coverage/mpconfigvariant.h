@@ -42,3 +42,6 @@
 #define MICROPY_TRACKED_ALLOC          (1)
 #define MICROPY_WARNINGS_CATEGORY      (1)
 #define MICROPY_PY_UCRYPTOLIB_CTR      (1)
+
+// Add extra checks to satisfy gcc -fsanitize-undefined
+#define MICROPY_NONNULL_COMPLIANT (1)
