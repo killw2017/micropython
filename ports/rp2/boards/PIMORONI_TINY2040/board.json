@@ -16,5 +16,9 @@
     "product": "Tiny2040",
     "thumbnail": "",
     "url": "https://shop.pimoroni.com/products/tiny-2040",
+    "variants": {
+        "flash_2mb": "2 MiB Flash",
+        "flash_8mb": "8 MiB Flash"
+    },
     "vendor": "Pimoroni"
 }
