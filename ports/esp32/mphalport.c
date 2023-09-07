@@ -48,6 +48,8 @@
 #include "usb_serial_jtag.h"
 #include "uart.h"
 
+#include "py/mpprint.h"
+
 TaskHandle_t mp_main_task_handle;
 
 STATIC uint8_t stdin_ringbuf_array[260];

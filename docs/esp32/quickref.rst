@@ -141,7 +141,7 @@ These are working configurations for LAN interfaces of popular boards::
     # Olimex ESP32-GATEWAY: power controlled by Pin(5)
     # Olimex ESP32 PoE and ESP32-PoE ISO: power controlled by Pin(12)
 
-    lan = network.LAN(mdc=machine.Pin(23), mdio=machine.Pin(18), power=machine.Pin(5), 
+    lan = network.LAN(mdc=machine.Pin(23), mdio=machine.Pin(18), power=machine.Pin(5),
                       phy_type=network.PHY_LAN8720, phy_addr=0,
                       ref_clk=machine.Pin(17), ref_clk_mode=machine.Pin.OUT)
 
@@ -329,6 +329,35 @@ have the same frequency.  On the other hand, 16 independent PWM duty cycles are
 possible at the same frequency.
 
 See more examples in the :ref:`esp32_pwm` tutorial.
+
+MCPWM (motor control pulse width modulation)
+--------------------------------------------
+
+MCPWM can be enabled on all output-enabled pins. The API differs slightly from **machine.PWM** to allow explicit timer selection.
+Currently, this implementation only covers basic functionality.
+
+For more details, see Espressif's `MCPWM
+<https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/mcpwm.html>`_ documentation.
+
+Use the esp32.MCPWM class::
+
+    from machine import Pin
+    from esp32 import MCPWM
+
+    mcpwm = MCPWM(0, (Pin(16), Pin(17)), freq=1000, duty_u16=32768)  # create MCPWM object with timer (0..5)
+
+    freq = mcpwm.freq()             # get current frequency
+    # mcpwm.freq(500)               # set frequency in Hz. Not supported!
+
+    duty_u16 = mcpwm.duty_u16()     # get current duty cycle, range 0-65535, (now 32768, 50% of duty)
+    duty_ns = mcpwm.duty_ns()       # get current pulse width in ns, (now 500000 ns, 50% of duty)
+
+    mcpwm.duty_u16(2**16 * 3 // 4)  # set duty cycle from 0 to 65536 as a ratio duty_u16/65536, (now 75% of duty)
+    mcpwm.duty_ns(250000)           # set pulse width in nanoseconds from 0 to 1_000_000_000/freq, (now 25% of duty)
+
+    print(mcpwm)                    # view MCPWM settings
+
+    mcpwm.deinit()                  # turn of MCPWM on pins
 
 ADC (analog to digital conversion)
 ----------------------------------
