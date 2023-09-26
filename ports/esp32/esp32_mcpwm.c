@@ -40,6 +40,14 @@
 #include "mphalport.h"
 #include "esp_err.h"
 
+#if 1 // MICROPY_DEBUG_VERBOSE // print debugging info
+#define DEBUG_PRINT (1)
+#define DEBUG_printf DEBUG_printf
+#else // don't print debugging info
+#define DEBUG_PRINT (0)
+#define DEBUG_printf(...) (void)0
+#endif
+
 #if SOC_MCPWM_SUPPORTED
 
 // #if SOC_TEMP_SENSOR_SUPPORTED
@@ -575,6 +583,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mcpwm_duty_ns_obj, 1, 2, mcpwm_duty_n
 
 STATIC void configure_mcpwm(esp32_mcpwm_obj_t *self) {
     MP_DEBUG_PRINT(6, "configure_mcpwm() group_id=%d resolution_hz=%d period_ticks=%d action=%d", self->group_id, self->resolution_hz, self->period_ticks, self->action);
+    DEBUG_printf("configure_mcpwm() group_id=%d resolution_hz=%d period_ticks=%d action=%d\n", self->group_id, self->resolution_hz, self->period_ticks, self->action);
 
     mcpwm_timer_config_t timer_config = {
         .group_id = self->group_id,
