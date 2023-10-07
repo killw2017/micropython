@@ -546,6 +546,9 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
         skip_tests.add("cmdline/cmd_parsetree.py")
         skip_tests.add("cmdline/repl_sys_ps1_ps2.py")
         skip_tests.add("extmod/ssl_poll.py")
+    elif args.emit == "native":
+        skip_tests.add("extmod/asyncio_heaplock.py")
+        skip_tests.add("thread/thread_exc1.py")
 
     # Some tests shouldn't be run on a PC
     if args.target == "unix":
@@ -628,6 +631,7 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
         skip_tests.add("extmod/asyncio_lock.py")  # requires async with
         skip_tests.add("extmod/asyncio_micropython.py")  # unknown issue
         skip_tests.add("extmod/asyncio_wait_for.py")  # unknown issue
+        skip_tests.add("extmod/asyncio_taskgroup.py")  # requires async with
         skip_tests.add("misc/features.py")  # requires raise_varargs
         skip_tests.add(
             "misc/print_exception.py"
