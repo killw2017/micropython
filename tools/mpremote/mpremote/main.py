@@ -18,7 +18,7 @@ MicroPython device over a serial connection.  Commands supported are:
 """
 
 import argparse
-import os, sys, time
+import hashlib, os, sys, time
 from collections.abc import Mapping
 from textwrap import dedent
 
@@ -181,7 +181,17 @@ def argparse_rtc():
 
 def argparse_filesystem():
     cmd_parser = argparse.ArgumentParser(description="execute filesystem commands on the device")
-    _bool_flag(cmd_parser, "recursive", "r", False, "recursive copy (for cp command only)")
+    _bool_flag(cmd_parser, "recursive", "r", False, "recursive copy (for 'cp' command only)")
+    cmd_parser.add_argument(
+        "--algorithm",
+        "-a",
+        type=str,
+        default="sha256",
+        metavar="ALGO",
+        choices=list(hashlib.algorithms_guaranteed),
+        help="hash algorithm to use (for 'hash' command only): "
+        + ", ".join(sorted(hashlib.algorithms_guaranteed)),
+    )
     _bool_flag(
         cmd_parser,
         "verbose",
@@ -190,7 +200,7 @@ def argparse_filesystem():
         "enable verbose output (defaults to True for all commands except cat)",
     )
     cmd_parser.add_argument(
-        "command", nargs=1, help="filesystem command (e.g. cat, cp, ls, rm, touch)"
+        "command", nargs=1, help="filesystem command (e.g. cat, cp, hash, ls, rm, rmdir, touch)"
     )
     cmd_parser.add_argument("path", nargs="+", help="local and remote paths")
     return cmd_parser
@@ -308,12 +318,13 @@ _BUILTIN_COMMAND_EXPANSIONS = {
     },
     # Filesystem shortcuts (use `cp` instead of `fs cp`).
     "cat": "fs cat",
-    "ls": "fs ls",
     "cp": "fs cp",
-    "rm": "fs rm",
-    "touch": "fs touch",
+    "hash": "fs hash",
+    "ls": "fs ls",
     "mkdir": "fs mkdir",
+    "rm": "fs rm",
     "rmdir": "fs rmdir",
+    "touch": "fs touch",
     # Disk used/free.
     "df": [
         "exec",
