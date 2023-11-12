@@ -30,7 +30,7 @@ except ValueError:
     print("ValueError")
 
 try:
-    for (k,v) in db.items():
+    for k, v in db.items():
         pass
 except ValueError:
     print("ValueError")
