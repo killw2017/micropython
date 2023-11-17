@@ -46,9 +46,9 @@
 void octospi_init(void) {
     // Configure OCTOSPI pins (allows 1, 2, 4 or 8 line configuration).
     #if defined(STM32H7)
-    #define STATIC_AF_OCTOSPI(signal) STATIC_AF_OCTOSPIM_P1_ ## signal
+    #define STATIC_AF_OCTOSPI(signal) STATIC_AF_OCTOSPIM_P1_##signal
     #else
-    #define STATIC_AF_OCTOSPI(signal) STATIC_AF_OCTOSPI1_ ## signal
+    #define STATIC_AF_OCTOSPI(signal) STATIC_AF_OCTOSPI1_##signal
     #endif
     mp_hal_pin_config_alt_static_speed(MICROPY_HW_OSPIFLASH_CS, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, MP_HAL_PIN_SPEED_VERY_HIGH, STATIC_AF_OCTOSPI(NCS));
     mp_hal_pin_config_alt_static_speed(MICROPY_HW_OSPIFLASH_SCK, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, MP_HAL_PIN_SPEED_VERY_HIGH, STATIC_AF_OCTOSPI(CLK));
