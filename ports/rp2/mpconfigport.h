@@ -263,6 +263,7 @@ typedef intptr_t mp_off_t;
 #define BINARY_INFO_ID_MP_FROZEN 0x4a99d719
 #define MICROPY_FROZEN_LIST_ITEM(name, file) bi_decl(bi_string(BINARY_INFO_TAG_MICROPYTHON, BINARY_INFO_ID_MP_FROZEN, name))
 
+
 extern uint32_t rosc_random_u32(void);
 extern void lwip_lock_acquire(void);
 extern void lwip_lock_release(void);
