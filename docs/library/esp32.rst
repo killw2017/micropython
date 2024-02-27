@@ -44,6 +44,23 @@ Functions
 
     Read the raw value of the internal temperature sensor, returning an integer.
 
+    Only available on ESP32.
+
+.. function:: temperature()
+
+    Read the value of the internal temperature sensor in celsius, returning a float.
+
+    Available on ESP32-S2, S3 and C3.
+
+.. Note::
+   The temperature sensor is designed primarily to measure the temperature changes inside
+   the chip. The temperature value depends on factors like microcontroller clock frequency
+   or I/O load. Generally, the chip’s internal temperature might be higher than the ambient temperature.
+
+.. function:: hall_sensor()
+
+    Read the raw value of the internal Hall sensor, returning an integer.
+
 .. function:: idf_heap_info(capabilities)
 
     Returns information about the ESP-IDF heap memory regions. One of them contains
