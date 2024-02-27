@@ -43,8 +43,41 @@ assert uctypes.sizeof(S.arr4) == 6
 print(uctypes.sizeof(S.sub))
 assert uctypes.sizeof(S.sub) == 1
 
-# invalid descriptor
+# invalid descriptors
 try:
     print(uctypes.sizeof([]))
 except TypeError:
     print("TypeError")
+
+try:
+    print(uctypes.sizeof(()))
+except TypeError:
+    print("TypeError")
+
+try:
+    print(uctypes.sizeof(("garbage")))
+except TypeError:
+    print("TypeError")
+
+try:
+    print(uctypes.sizeof((0, {}, "garbage")))
+except TypeError:
+    print("TypeError")
+
+try:
+    print(uctypes.sizeof((uctypes.PTR | 0)))
+except TypeError:
+    print("TypeError")
+
+try:
+    print(uctypes.sizeof((uctypes.ARRAY | 0)))
+except TypeError:
+    print("TypeError")
+
+try:
+    print(uctypes.sizeof((uctypes.ARRAY | 0, 1, {}, "garbage")))
+except TypeError:
+    print("TypeError")
+
+# empty descriptor
+print(uctypes.sizeof({}))
