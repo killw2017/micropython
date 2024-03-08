@@ -17,7 +17,14 @@ ifeq ($(wildcard $(BOARD_DIR)/.),)
     $(error Invalid BOARD specified: $(BOARD_DIR))
 endif
 
+# If the build directory is not given, make it reflect the board name (and
+# optionally the board variant).
+ifneq ($(BOARD_VARIANT),)
+BUILD ?= build-$(BOARD)-$(BOARD_VARIANT)
+else
 BUILD ?= build-$(BOARD)
+endif
+
 PORT ?= /dev/ttyACM0
 CROSS_COMPILE ?= arm-none-eabi-
 GIT_SUBMODULES += lib/tinyusb lib/nxp_driver
@@ -49,6 +56,7 @@ FROZEN_MANIFEST ?= boards/manifest.py
 # Include py core make definitions
 include $(TOP)/py/py.mk
 include $(TOP)/extmod/extmod.mk
+include ${TOP}/extmod/nimble/nimble.mk
 
 # Set SDK directory based on MCU_SERIES
 MCU_DIR = lib/nxp_driver/sdk/devices/$(MCU_SERIES)
@@ -106,8 +114,9 @@ SRC_TINYUSB_C += \
 	lib/tinyusb/src/portable/chipidea/ci_hs/dcd_ci_hs.c \
 	lib/tinyusb/src/tusb.c
 
-# All settings for Ethernet support are controller by the value of MICROPY_PY_LWIP
+# All settings for Ethernet support are controller by the value of MICROPY_PY_LWIP and the supported MCUs
 ifeq ($(MICROPY_PY_LWIP),1)
+ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES), MIMXRT1021 MIMXRT1052 MIMXRT1062 MIMXRT1064 MIMXRT1176))
 SRC_ETH_C += \
 	$(MCU_DIR)/drivers/fsl_enet.c \
 	hal/phy/device/phydp83825/fsl_phydp83825.c \
@@ -116,6 +125,18 @@ SRC_ETH_C += \
 	hal/phy/device/phylan8720/fsl_phylan8720.c \
 	hal/phy/device/phyrtl8211f/fsl_phyrtl8211f.c \
 	hal/phy/mdio/enet/fsl_enet_mdio.c
+endif
+endif
+
+ifeq ($(MICROPY_PY_NETWORK_NINAW10),1)
+CFLAGS += -DMICROPY_PY_NETWORK_NINAW10=1
+INC += -I$(TOP)/drivers/ninaw10
+
+SRC_C += \
+    drivers/ninaw10/nina_bt_hci.c \
+    drivers/ninaw10/nina_wifi_drv.c \
+    drivers/ninaw10/nina_wifi_bsp.c \
+    drivers/ninaw10/machine_pin_nina.c
 endif
 
 # NXP SDK sources
@@ -208,6 +229,7 @@ SRC_C += \
 	mphalport.c \
 	mpnetworkport.c \
 	network_lan.c \
+	nina_wifi_bsp.c \
 	pendsv.c \
 	pin.c \
 	sdcard.c \
@@ -231,6 +253,14 @@ SHARED_SRC_C += \
 	shared/runtime/stdout_helpers.c \
 	shared/runtime/sys_stdio_mphal.c \
 	shared/timeutils/timeutils.c \
+
+ifeq ($(MICROPY_PY_BLUETOOTH),1)
+SRC_C += mpbthciport.c
+endif
+
+ifeq ($(MICROPY_BLUETOOTH_NIMBLE),1)
+SRC_C += mpnimbleport.c
+endif
 
 # Set flash driver name, base address and internal flash flag, based on the flash type.
 ifeq ($(MICROPY_HW_FLASH_TYPE),$(filter $(MICROPY_HW_FLASH_TYPE),qspi_nor_flash))
@@ -257,14 +287,6 @@ ifeq ($(MICROPY_HW_BOARD_FLASH_FILES),1)
     SRC_HAL_C += $(BOARD_DIR)/$(FLEXSPI_FLASH_TYPE)_config.c
 else
     SRC_HAL_C += hal/$(FLEXSPI_FLASH_TYPE)_config.c
-endif
-
-ifeq ($(MICROPY_PY_BLUETOOTH),1)
-SRC_C += mpbthciport.c
-endif # MICROPY_PY_BLUETOOTH
-
-ifeq ($(MICROPY_BLUETOOTH_NIMBLE),1)
-SRC_C += mpnimbleport.c
 endif
 
 # Math library source files
