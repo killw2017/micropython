@@ -3,6 +3,7 @@
 
 from time import ticks_ms as ticks, ticks_diff, ticks_add
 import sys, select
+from select import POLLIN, POLLOUT
 
 # Import TaskQueue and Task, preferring built-in C code over Python code
 try:
@@ -67,6 +68,8 @@ def sleep(t):
 ################################################################################
 # Queue and poller for stream IO
 
+nPOLLIN = ~POLLIN
+nPOLLOUT = ~POLLOUT
 
 class IOQueue:
     def __init__(self):
@@ -78,13 +81,13 @@ class IOQueue:
             entry = [None, None, s]
             entry[idx] = cur_task
             self.map[id(s)] = entry
-            self.poller.register(s, select.POLLIN if idx == 0 else select.POLLOUT)
+            self.poller.register(s, POLLIN if idx == 0 else POLLOUT)
         else:
             sm = self.map[id(s)]
             assert sm[idx] is None
             assert sm[1 - idx] is not None
             sm[idx] = cur_task
-            self.poller.modify(s, select.POLLIN | select.POLLOUT)
+            self.poller.modify(s, POLLIN | POLLOUT)
         # Link task to this IOQueue so it can be removed if needed
         cur_task.data = self
 
@@ -114,21 +117,22 @@ class IOQueue:
     def wait_io_event(self, dt):
         for s, ev in self.poller.ipoll(dt):
             sm = self.map[id(s)]
+            q0, q1, _ = sm
             # print('poll', s, sm, ev)
-            if ev & ~select.POLLOUT and sm[0] is not None:
+            if ev & nPOLLOUT and q0 is not None:
                 # POLLIN or error
-                _task_queue.push(sm[0])
+                _task_queue.push(q0)
                 sm[0] = None
-            if ev & ~select.POLLIN and sm[1] is not None:
+            if ev & nPOLLIN and q1 is not None:
                 # POLLOUT or error
-                _task_queue.push(sm[1])
+                _task_queue.push(q1)
                 sm[1] = None
-            if sm[0] is None and sm[1] is None:
+            if q0 is None and q1 is None:
                 self._dequeue(s)
-            elif sm[0] is None:
-                self.poller.modify(s, select.POLLOUT)
+            elif q0 is None:
+                self.poller.modify(s, POLLOUT)
             else:
-                self.poller.modify(s, select.POLLIN)
+                self.poller.modify(s, POLLIN)
 
 
 ################################################################################
