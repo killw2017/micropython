@@ -153,21 +153,23 @@ def run_until_complete(main_task=None):
     global cur_task
     excs_all = (CancelledError, Exception)  # To prevent heap allocation in loop
     excs_stop = (CancelledError, StopIteration)  # To prevent heap allocation in loop
-    _io_queue.wait_io_event(0)
     while True:
         try:
-            # Wait until the head of _task_queue is ready to run
-            t = _task_queue.peek()
-            if t:
-                # A task waiting on _task_queue; "ph_key" is time to schedule task at
-                dt = ticks_diff(t.ph_key, ticks())
-                _io_queue.wait_io_event(dt if dt > 0 else 0)
-            elif not _io_queue.map:
-                # No tasks can be woken so finished running
-                cur_task = None
-                return
-            else:
-                _io_queue.wait_io_event(-1)
+            while True:
+                # Wait until the head of _task_queue is ready to run
+                t = _task_queue.peek()
+                if t:
+                    # A task waiting on _task_queue; "ph_key" is time to schedule task at
+                    dt = ticks_diff(t.ph_key, ticks())
+                    _io_queue.wait_io_event(dt if dt > 0 else 0)
+                    if dt <= 0:
+                        break
+                elif not _io_queue.map:
+                    # No tasks can be woken so finished running
+                    cur_task = None
+                    return
+                else:
+                    _io_queue.wait_io_event(-1)
         except BaseException as exc:
             try:
                 if main_task:
