@@ -312,6 +312,13 @@ mp_obj_t mp_obj_int_binary_op(mp_binary_op_t op, mp_obj_t lhs_in, mp_obj_t rhs_i
                 return MP_OBJ_NULL; // op not supported
         }
 
+        mp_int_t res_small;
+        if (mpz_as_int_checked(&res->mpz, &res_small)) {
+            if (MP_SMALL_INT_FITS(res_small)) {
+                return MP_OBJ_NEW_SMALL_INT(res_small);
+            }
+        }
+
         return MP_OBJ_FROM_PTR(res);
 
     } else {
