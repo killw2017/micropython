@@ -632,7 +632,7 @@ static mp_uint_t wiznet5k_socket_send(mod_network_socket_obj_t *socket, const by
         *_errno = -ret;
         return -1;
     }
-    else if (ret == SOCK_BUSY) {
+    else if (ret == SOCK_BUSY && getSn_SR(socket->fileno) == SOCK_ESTABLISHED) {
         *_errno = MP_EAGAIN;
         return -1;
     }
@@ -661,7 +661,9 @@ static mp_uint_t wiznet5k_socket_recv(mod_network_socket_obj_t *socket, byte *bu
         *_errno = -ret;
         return -1;
     }
-    else if (ret == SOCK_BUSY) {
+    // NOTE: SOCK_BUSY is zero (0) which is confusing if the socket is closed
+    // and at EOF
+    else if (ret == SOCK_BUSY && getSn_SR(socket->fileno) == SOCK_ESTABLISHED) {
         *_errno = MP_EAGAIN;
         return -1;
     }
