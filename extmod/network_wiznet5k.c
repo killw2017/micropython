@@ -500,12 +500,23 @@ static void wiznet5k_init(void) {
 static int wiznet5k_gethostbyname(mp_obj_t nic, const char *name, mp_uint_t len, uint8_t *out_ip) {
     uint8_t dns_ip[MOD_NETWORK_IPADDR_BUF_SIZE] = {8, 8, 8, 8};
     uint8_t *buf = m_new(uint8_t, MAX_DNS_BUF_SIZE);
-    DNS_init(2, buf);
+    mp_int_t sn = wiznet5k_allocate_socket();
+    if (sn == -1) {
+        return -2;
+    }
+
+    DNS_init(sn, buf);
     if (wiznet5k_obj.netinfo.dns[0]) {
         memcpy(dns_ip, wiznet5k_obj.netinfo.dns, MOD_NETWORK_IPADDR_BUF_SIZE);
     }
     mp_int_t ret = DNS_run(dns_ip, (uint8_t *)name, out_ip);
     m_del(uint8_t, buf, MAX_DNS_BUF_SIZE);
+
+    // NOTE: DNS_run will close the socket, so it just needs to be marked as
+    // unused here and clear any interrupts.
+    wiznet5k_obj.socket_used &= ~(1 << sn);
+    wizchip_clrinterrupt(IK_SOCK_0 << sn);
+
     if (ret == 1) {
         // success
         return 0;
