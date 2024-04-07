@@ -37,6 +37,7 @@
 #if MICROPY_PY_NETWORK_WIZNET5K
 
 #include "shared/netutils/netutils.h"
+#include "shared/runtime/softtimer.h"
 #include "extmod/modnetwork.h"
 #include "extmod/modmachine.h"
 #include "extmod/virtpin.h"
@@ -74,6 +75,14 @@
 #include "lib/wiznet5k/Internet/DNS/dns.h"
 #include "lib/wiznet5k/Internet/DHCP/dhcp.h"
 
+// Poll WIZnet every 64ms by default (if not using interrupt pin)
+#define WIZNET5K_TICK_RATE_MS 64
+// In DHCP.c, RIP_MSG max size is defined as 312 + 256 (sadly, not in the header)
+#define MAX_DHCP_BUF_SIZE 568
+
+// Soft timer for polling and running DHCP in the background.
+static soft_timer_entry_t mp_network_soft_timer;
+
 #endif
 
 #ifndef printf
@@ -110,6 +119,11 @@ typedef struct _wiznet5k_obj_t {
     wiz_NetInfo netinfo;
     uint8_t socket_used;
     bool active;
+    uint8_t *dhcp_buf;
+    uint8_t dhcp_retry;
+    uint8_t dhcp_state;
+    mp_int_t dhcp_socket;
+    uint32_t dhcp_timeout;
     #endif
 } wiznet5k_obj_t;
 
@@ -356,12 +370,57 @@ void wiznet5k_poll(void) {
 
 #if WIZNET5K_PROVIDED_STACK
 
+static mp_int_t wiznet5k_allocate_socket(void) {
+    // get first unused socket number
+    for (mp_uint_t sn = 0; sn < _WIZCHIP_SOCK_NUM_; sn++) {
+        if ((wiznet5k_obj.socket_used & (1 << sn)) == 0) {
+            wiznet5k_obj.socket_used |= (1 << sn);
+            return sn;
+        }
+    }
+
+    return -1;
+}
+
+extern uint8_t DHCP_SOCKET;
+static void wiznet5k_dhcp_poll(void) {
+    if (wiznet5k_obj.dhcp_socket != -1) {
+        wiznet5k_obj.dhcp_state = DHCP_run();
+    }
+
+    if (wiznet5k_obj.dhcp_state == DHCP_IP_LEASED) {
+        // Every few seconds, check in about renewing the IP
+        if (wiznet5k_obj.dhcp_socket != -1) {
+            // Release socket and reset timeout
+            wiznet5k_obj.socket_used &= ~(1 << wiznet5k_obj.dhcp_socket);
+            wiznet5k_obj.dhcp_socket = -1;
+
+            // Run about once per minute
+            wiznet5k_obj.dhcp_timeout = mp_hal_ticks_ms() + 60000;
+        } else if (mp_hal_ticks_ms() > wiznet5k_obj.dhcp_timeout) {
+            mp_uint_t sn = wiznet5k_allocate_socket();
+            if (sn != -1) {
+                DHCP_SOCKET = sn;
+                wiznet5k_obj.dhcp_socket = sn;
+                wiznet5k_obj.dhcp_state = DHCP_run();
+            }
+        }
+    } else if (wiznet5k_obj.dhcp_state == DHCP_FAILED || wiznet5k_obj.dhcp_state == DHCP_STOPPED) {
+        if (wiznet5k_obj.dhcp_socket != -1) {
+            wiznet5k_obj.socket_used &= ~(1 << wiznet5k_obj.dhcp_socket);
+            wiznet5k_obj.dhcp_socket = -1;
+        }
+    }
+}
+
 void wiznet5k_try_poll(void) {
+    // If using DHCP for the interface, periodically renew/update the address
+    wiznet5k_dhcp_poll();
+
     // There's really nothing to do here. The interrupt that triggered this will
     // release a WFE() wait and will trigger a poll() loop which will
     // wiznet5k_socket_ioctl will detect the readable or writeable state of the
-    // respective socket.
-    (void)0;
+    // respective socket(s).
 }
 
 static void wiz_dhcp_assign(void) {
@@ -373,12 +432,28 @@ static void wiz_dhcp_assign(void) {
 }
 
 static void wiz_dhcp_update(void) {
-    ;
+    wiz_dhcp_assign();
 }
 
 
 static void wiz_dhcp_conflict(void) {
     ;
+}
+
+// This is called by soft_timer and executes at PendSV level.
+static void mp_network_soft_timer_callback(soft_timer_entry_t *self) {
+    wiznet5k_try_poll();
+}
+
+static void mod_network_wiznet5k_poll_init(void) {
+    soft_timer_static_init(
+        &mp_network_soft_timer,
+        SOFT_TIMER_MODE_PERIODIC,
+        WIZNET5K_TICK_RATE_MS,
+        mp_network_soft_timer_callback
+        );
+
+    soft_timer_reinsert(&mp_network_soft_timer, WIZNET5K_TICK_RATE_MS);
 }
 
 static void wiznet5k_init(void) {
@@ -415,8 +490,11 @@ static void wiznet5k_init(void) {
 
     // register with network module
     mod_network_register_nic(&wiznet5k_obj);
+    mod_network_wiznet5k_poll_init();
 
     wiznet5k_obj.active = true;
+    wiznet5k_obj.dhcp_socket = -1;
+    wiznet5k_obj.dhcp_state = DHCP_STOPPED;
 }
 
 static int wiznet5k_gethostbyname(mp_obj_t nic, const char *name, mp_uint_t len, uint8_t *out_ip) {
@@ -457,13 +535,7 @@ static int wiznet5k_socket_socket(mod_network_socket_obj_t *socket, int *_errno)
 
     if (socket->fileno == -1) {
         // get first unused socket number
-        for (mp_uint_t sn = 0; sn < _WIZCHIP_SOCK_NUM_; sn++) {
-            if ((wiznet5k_obj.socket_used & (1 << sn)) == 0) {
-                wiznet5k_obj.socket_used |= (1 << sn);
-                socket->fileno = sn;
-                break;
-            }
-        }
+        socket->fileno = wiznet5k_allocate_socket();
         if (socket->fileno == -1) {
             // too many open sockets
             *_errno = MP_EMFILE;
@@ -500,6 +572,7 @@ static void wiznet5k_socket_close(mod_network_socket_obj_t *socket) {
         }
     }
 
+    m_del(wiznet5k_socket_extra_t, socket->_private, 1);
     socket->_private = NULL;
 }
 
@@ -597,7 +670,7 @@ static int wiznet5k_socket_connect(mod_network_socket_obj_t *socket, byte *ip, m
     }
     else if (socket->type == Sn_MR_UDP) {
         // For POSIX usage of ::send later, stash the remote IP and port
-        wiznet5k_socket_extra_t *extra = (wiznet5k_socket_extra_t *)m_malloc(sizeof(wiznet5k_socket_extra_t));
+        wiznet5k_socket_extra_t *extra = m_new_maybe(wiznet5k_socket_extra_t, 1);
         if (extra == NULL) {
             *_errno = MP_ENOMEM;
             return -1;
@@ -798,23 +871,31 @@ static int wiznet5k_socket_ioctl(mod_network_socket_obj_t *socket, mp_uint_t req
 }
 
 static void wiznet5k_dhcp_init(wiznet5k_obj_t *self) {
-    uint8_t test_buf[2048];
-    uint8_t ret = 0;
     uint8_t dhcp_retry = 0;
+    self->dhcp_state = DHCP_STOPPED;
+    self->dhcp_buf = m_new_maybe(uint8_t, MAX_DHCP_BUF_SIZE);
+    if (self->dhcp_buf == NULL) {
+        return;
+    }
 
-    while (ret != DHCP_IP_LEASED) {
+    self->dhcp_socket = wiznet5k_allocate_socket();
+    if (self->dhcp_socket == -1) {
+        return;
+    }
+
+
+    while (self->dhcp_state != DHCP_IP_LEASED) {
         mp_uint_t timeout = mp_hal_ticks_ms() + 3000;
-        DHCP_init(1, test_buf);
+        DHCP_init(self->dhcp_socket, self->dhcp_buf);
 
         while (1) {
-            ret = DHCP_run();
-            if (ret == DHCP_IP_LEASED) {
+            mpy_wiznet_yield();
+            if (self->dhcp_state == DHCP_IP_LEASED) {
                 break;
-            } else if (ret == DHCP_FAILED || mp_hal_ticks_ms() > timeout) {
+            } else if (self->dhcp_state == DHCP_FAILED || mp_hal_ticks_ms() > timeout) {
                 dhcp_retry++;
                 break;
             }
-            mpy_wiznet_yield();
         }
 
         if (dhcp_retry > 3) {
@@ -823,11 +904,11 @@ static void wiznet5k_dhcp_init(wiznet5k_obj_t *self) {
         }
     }
 
-    if (ret == DHCP_IP_LEASED) {
+    if (self->dhcp_state == DHCP_IP_LEASED) {
         ctlnetwork(CN_GET_NETINFO, &self->netinfo);
     }
 
-    wizchip_clrinterrupt(IK_SOCK_1);
+    wizchip_clrinterrupt(IK_SOCK_0 << self->dhcp_socket);
 }
 
 #endif // WIZNET5K_PROVIDED_STACK
@@ -1042,6 +1123,11 @@ static mp_obj_t wiznet5k_ifconfig(size_t n_args, const mp_obj_t *args) {
     } else {
         // Set static IP addresses
         self->netinfo.dhcp = NETINFO_STATIC;
+        self->dhcp_state = DHCP_STOPPED;
+        if (self->dhcp_buf) {
+            m_del(uint8_t, self->dhcp_buf, MAX_DHCP_BUF_SIZE);
+            self->dhcp_buf = NULL;
+        }
         mp_obj_t *items;
         mp_obj_get_array_fixed_n(args[1], 4, &items);
         netutils_parse_ipv4_addr(items[0], netinfo.ip, NETUTILS_BIG);
