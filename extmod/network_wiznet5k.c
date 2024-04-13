@@ -120,10 +120,9 @@ typedef struct _wiznet5k_obj_t {
     uint8_t socket_used;
     bool active;
     uint8_t *dhcp_buf;
-    uint8_t dhcp_retry;
     uint8_t dhcp_state;
     mp_int_t dhcp_socket;
-    uint32_t dhcp_timeout;
+    uint32_t dhcp_renew;
     #endif
 } wiznet5k_obj_t;
 
@@ -396,8 +395,8 @@ static void wiznet5k_dhcp_poll(void) {
             wiznet5k_obj.dhcp_socket = -1;
 
             // Run about once per minute
-            wiznet5k_obj.dhcp_timeout = mp_hal_ticks_ms() + 60000;
-        } else if (mp_hal_ticks_ms() > wiznet5k_obj.dhcp_timeout) {
+            wiznet5k_obj.dhcp_renew = mp_hal_ticks_ms() + 60000;
+        } else if (mp_hal_ticks_ms() > wiznet5k_obj.dhcp_renew) {
             mp_uint_t sn = wiznet5k_allocate_socket();
             if (sn != -1) {
                 DHCP_SOCKET = sn;
@@ -715,10 +714,12 @@ static mp_uint_t wiznet5k_socket_send(mod_network_socket_obj_t *socket, const by
         wiznet5k_socket_close(socket);
         *_errno = -ret;
         return -1;
-    }
-    else if (ret == SOCK_BUSY && getSn_SR(socket->fileno) == SOCK_ESTABLISHED) {
-        *_errno = MP_EAGAIN;
-        return -1;
+    } else if (ret == SOCK_BUSY) {
+        uint8_t status = getSn_SR(socket->fileno);
+        if (status == SOCK_ESTABLISHED || status == SOCK_CLOSE_WAIT) {
+            *_errno = MP_EAGAIN;
+            return -1;
+        }
     }
     return ret;
 }
@@ -744,12 +745,14 @@ static mp_uint_t wiznet5k_socket_recv(mod_network_socket_obj_t *socket, byte *bu
         wiznet5k_socket_close(socket);
         *_errno = -ret;
         return -1;
-    }
     // NOTE: SOCK_BUSY is zero (0) which is confusing if the socket is closed
     // and at EOF
-    else if (ret == SOCK_BUSY && getSn_SR(socket->fileno) == SOCK_ESTABLISHED) {
-        *_errno = MP_EAGAIN;
-        return -1;
+    } else if (ret == SOCK_BUSY) {
+        uint8_t status = getSn_SR(socket->fileno);
+        if (status == SOCK_ESTABLISHED || status == SOCK_CLOSE_WAIT) {
+            *_errno = MP_EAGAIN;
+            return -1;
+        }
     }
     return ret;
 }
