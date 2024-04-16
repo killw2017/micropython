@@ -128,8 +128,8 @@ typedef struct _wiznet5k_obj_t {
 
 #if WIZNET5K_PROVIDED_STACK
 typedef struct _wiznet5k_socket_extra_t {
-    byte        remote_ip[4];
-    mp_uint_t   remote_port;
+    byte remote_ip[4];
+    mp_uint_t remote_port;
 } wiznet5k_socket_extra_t;
 #endif
 
@@ -660,7 +660,7 @@ static int wiznet5k_socket_connect(mod_network_socket_obj_t *socket, byte *ip, m
         return -1;
     }
 
-    // WIZnet doesn't support connect on UDP sockets. TODO: Stash the remote
+    // WIZnet doesn't support connect on UDP sockets. Stash the remote
     // information for use with the ::send method, if used on this UDP socket.
     if (socket->type == Sn_MR_TCP) {
         // now connect
@@ -672,13 +672,11 @@ static int wiznet5k_socket_connect(mod_network_socket_obj_t *socket, byte *ip, m
             wiznet5k_socket_close(socket);
             *_errno = -ret;
             return -1;
-        }
-        else if (ret == SOCK_BUSY) {
+        } else if (ret == SOCK_BUSY) {
             *_errno = MP_EAGAIN;
             return -1;
         }
-    }
-    else if (socket->type == Sn_MR_UDP) {
+    } else if (socket->type == Sn_MR_UDP) {
         // For POSIX usage of ::send later, stash the remote IP and port
         wiznet5k_socket_extra_t *extra = m_new_maybe(wiznet5k_socket_extra_t, 1);
         if (extra == NULL) {
@@ -698,7 +696,7 @@ static mp_uint_t wiznet5k_socket_sendto(mod_network_socket_obj_t *socket, const 
 static mp_uint_t wiznet5k_socket_send(mod_network_socket_obj_t *socket, const byte *buf, mp_uint_t len, int *_errno) {
     if (socket->type == Sn_MR_UDP) {
         if (socket->_private != NULL) {
-            wiznet5k_socket_extra_t *extra = (wiznet5k_socket_extra_t*) socket->_private;
+            wiznet5k_socket_extra_t *extra = (wiznet5k_socket_extra_t *)socket->_private;
             return wiznet5k_socket_sendto(socket, buf, len, extra->remote_ip, extra->remote_port, _errno);
         }
         *_errno = MP_ENOTCONN;
@@ -745,9 +743,9 @@ static mp_uint_t wiznet5k_socket_recv(mod_network_socket_obj_t *socket, byte *bu
         wiznet5k_socket_close(socket);
         *_errno = -ret;
         return -1;
-    // NOTE: SOCK_BUSY is zero (0) which is confusing if the socket is closed
-    // and at EOF
     } else if (ret == SOCK_BUSY) {
+        // NOTE: SOCK_BUSY is zero (0) which is confusing if the socket is closed
+        // and at EOF
         uint8_t status = getSn_SR(socket->fileno);
         if (status == SOCK_ESTABLISHED || status == SOCK_CLOSE_WAIT) {
             *_errno = MP_EAGAIN;
@@ -773,8 +771,7 @@ static mp_uint_t wiznet5k_socket_sendto(mod_network_socket_obj_t *socket, const 
         wiznet5k_socket_close(socket);
         *_errno = -ret;
         return -1;
-    }
-    else if (ret == SOCK_BUSY) {
+    } else if (ret == SOCK_BUSY) {
         *_errno = MP_EAGAIN;
         return -1;
     }
@@ -803,8 +800,7 @@ static mp_uint_t wiznet5k_socket_recvfrom(mod_network_socket_obj_t *socket, byte
         wiznet5k_socket_close(socket);
         *_errno = -ret;
         return -1;
-    }
-    else if (ret == SOCK_BUSY) {
+    } else if (ret == SOCK_BUSY) {
         *_errno = MP_EAGAIN;
         return -1;
     }
@@ -832,8 +828,7 @@ static int wiznet5k_socket_settimeout(mod_network_socket_obj_t *socket, mp_uint_
     if (timeout_ms == 0) {
         // set non-blocking mode
         arg = SOCK_IO_NONBLOCK;
-    }
-    else {
+    } else {
         arg = SOCK_IO_BLOCK;
     }
 
