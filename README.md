@@ -19,7 +19,7 @@ Python 3.5 and some select features from later versions). The following core
 datatypes are provided: `str`(including basic Unicode support), `bytes`,
 `bytearray`, `tuple`, `list`, `dict`, `set`, `frozenset`, `array.array`,
 `collections.namedtuple`, classes and instances. Builtin modules include
-`os`, `sys`, `time`, `re`, and `struct`, etc. Selected ports have support for
+`os`, `sys`, `time`, `re`, and `struct`, etc. Some ports have support for
 `_thread` module (multithreading), `socket` and `ssl` for networking, and
 `asyncio`. Note that only a subset of Python 3 functionality is implemented
 for the data types and modules.
