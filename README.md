@@ -35,7 +35,7 @@ DAC, PWM, SPI, I2C, CAN, Bluetooth, and USB.
 Getting started
 ---------------
 
-See the [online documentation](https://docs.micropython.org/) for API
+See the [online documentation](https://docs.micropython.org/) for the API
 reference and information about using MicroPython and information about how
 it is implemented.
 
