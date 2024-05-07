@@ -210,6 +210,9 @@ static inline void *mp_obj_malloc_helper_dyn(size_t num_bytes, const mp_obj_type
 #define mp_arg_check_num(n_args, n_kw, n_args_min, n_args_max, takes_kw) \
     (mp_fun_table.arg_check_num_sig((n_args), (n_kw), MP_OBJ_FUN_MAKE_SIG((n_args_min), (n_args_max), (takes_kw))))
 
+#define mp_arg_parse_all_kw_array(n_pos, n_kw, args, n_allowed, allowed, out_vals) \
+    (mp_fun_table.arg_parse_all_kw_array((n_pos), (n_kw), (args), (n_allowed), (allowed), (out_vals)))
+
 #define MP_DYNRUNTIME_INIT_ENTRY \
     mp_obj_t old_globals = mp_fun_table.swap_globals(self->context->module.globals); \
     mp_raw_code_truncated_t rc; \
